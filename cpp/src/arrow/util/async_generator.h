@@ -34,6 +34,7 @@
 #include "arrow/util/mutex.h"
 #include "arrow/util/queue.h"
 #include "arrow/util/thread_pool.h"
+#include "arrow/util/windows_compatibility.h"
 
 namespace arrow {
 

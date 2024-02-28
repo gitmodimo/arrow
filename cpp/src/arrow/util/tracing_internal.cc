@@ -15,6 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#ifdef _MSC_VER
+#include "arrow/util/windows_compatibility.h"
+#endif
 #include "arrow/util/tracing_internal.h"
 #include "arrow/io/interfaces.h"
 #include "arrow/util/thread_pool.h"

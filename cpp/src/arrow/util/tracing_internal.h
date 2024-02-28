@@ -27,6 +27,7 @@
 #pragma warning(push)
 #pragma warning(disable : 4522)
 #endif
+#include <opentelemetry/sdk/trace/batch_span_processor_options.h>
 #include <opentelemetry/trace/provider.h>
 #include <opentelemetry/trace/scope.h>
 #ifdef _MSC_VER
@@ -122,17 +123,18 @@ struct Scope {
   opentelemetry::trace::Scope scope_impl;
 };
 
-opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>& UnwrapSpan(
+
+ARROW_EXPORT opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>& UnwrapSpan(
     ::arrow::util::tracing::SpanDetails* span);
 
-const opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>& UnwrapSpan(
+ARROW_EXPORT const opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>& UnwrapSpan(
     const ::arrow::util::tracing::SpanDetails* span);
 
-opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>& RewrapSpan(
+ARROW_EXPORT opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>& RewrapSpan(
     ::arrow::util::tracing::SpanDetails* span,
     opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> ot_span);
 
-opentelemetry::trace::StartSpanOptions SpanOptionsWithParent(
+ARROW_EXPORT opentelemetry::trace::StartSpanOptions SpanOptionsWithParent(
     const util::tracing::Span& parent_span);
 
 #define START_SPAN(target_span, ...)                           \

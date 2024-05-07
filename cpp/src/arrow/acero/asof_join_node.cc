@@ -1260,7 +1260,7 @@ class AsofJoinNode : public ExecNode {
           // Only add by field from the left table
           as_output = (j == 0);
         } else {
-          ARROW_RETURN_NOT_OK(is_valid_data_field(field));
+          //ARROW_RETURN_NOT_OK(is_valid_data_field(field));
           as_output = true;
         }
         if (as_output) {

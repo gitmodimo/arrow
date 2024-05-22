@@ -246,7 +246,8 @@ class UnmaterializedCompositeTable {
     for (const auto& unmaterialized_slice : slices) {
       const auto& [batch, start, end] = unmaterialized_slice.components[table_index];
       if (batch) {
-		 builder.AppendArraySlice(*batch->column_data(column_index),start,end-start);
+	 arrow::Status st = builder.AppendArraySlice(*batch->column_data(column_index),start,end-start);
+	 ARROW_RETURN_NOT_OK(st);
         /*for (uint64_t rowNum = start; rowNum < end; ++rowNum) {
           arrow::Status st = BuilderAppend<Type, Builder>(
               builder, batch->column_data(column_index), rowNum);

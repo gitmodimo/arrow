@@ -18,6 +18,7 @@
 #include "arrow/acero/asof_join_node.h"
 #include "arrow/acero/backpressure_handler.h"
 #include "arrow/acero/concurrent_queue_internal.h"
+#include "arrow/acero/accumulation_queue.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -471,7 +472,7 @@ class BackpressureController : public BackpressureControl {
   std::atomic<int32_t>& backpressure_counter_;
 };
 
-class InputState {
+class InputState: public util::SerialSequencingQueue::Processor{
   // InputState corresponds to an input
   // Input record batches are queued up in InputState until processed and
   // turned into output record batches.
@@ -482,7 +483,8 @@ class InputState {
              const std::shared_ptr<arrow::Schema>& schema,
              const col_index_t time_col_index,
              const std::vector<col_index_t>& key_col_index)
-      : queue_(std::move(handler)),
+      : sequencer_(util::SerialSequencingQueue::Make(this)),
+		queue_(std::move(handler)),
         schema_(schema),
         time_col_index_(time_col_index),
         key_col_index_(key_col_index),
@@ -495,6 +497,7 @@ class InputState {
         may_rehash_(may_rehash),
         tolerance_(tolerance),
         memo_(DEBUG_ADD(/*no_future=*/index == 0 || !tolerance.positive, node, index)) {
+			
     for (size_t k = 0; k < key_col_index_.size(); k++) {
       key_type_id_[k] = schema_->fields()[key_col_index_[k]]->type()->id();
     }
@@ -713,6 +716,19 @@ class InputState {
     memo_.times_.swap(new_memo.times_);
     memo_.swap(new_memo);
   }
+  
+  
+  Status InsertBatch(ExecBatch batch){
+	  return sequencer_->InsertBatch(std::move(batch));
+  }
+  
+  Status Process(ExecBatch batch) override {
+	auto rb = *batch.ToRecordBatch(schema_);
+    DEBUG_SYNC(node_, "received batch from input ", index_, ":", DEBUG_MANIP(std::endl),
+               rb->ToString(), DEBUG_MANIP(std::endl));
+    return Push(rb);
+  }
+  
 
   Status Push(const std::shared_ptr<arrow::RecordBatch>& rb) {
     if (rb->num_rows() > 0) {
@@ -756,6 +772,8 @@ class InputState {
   }
 
  private:
+  // ExecBatch Sequencer
+  std::unique_ptr<util::SerialSequencingQueue> sequencer_;
   // Pending record batches. The latest is the front. Batches cannot be empty.
   BackpressureConcurrentQueue<std::shared_ptr<RecordBatch>> queue_;
   // Schema associated with the input
@@ -1389,12 +1407,9 @@ class AsofJoinNode : public ExecNode {
     ARROW_DCHECK(std_has(inputs_, input));
     size_t k = std_find(inputs_, input) - inputs_.begin();
 
-    // Put into the queue
-    auto rb = *batch.ToRecordBatch(input->output_schema());
-    DEBUG_SYNC(this, "received batch from input ", k, ":", DEBUG_MANIP(std::endl),
-               rb->ToString(), DEBUG_MANIP(std::endl));
+	// Put into the sequencing queue
+	ARROW_RETURN_NOT_OK(state_.at(k)->InsertBatch(std::move(batch)));
 
-    ARROW_RETURN_NOT_OK(state_.at(k)->Push(rb));
     process_.Push(true);
     return Status::OK();
   }

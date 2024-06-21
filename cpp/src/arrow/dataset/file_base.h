@@ -483,6 +483,10 @@ class ARROW_DS_EXPORT WriteNodeOptions : public acero::ExecNodeOptions {
   std::shared_ptr<Schema> custom_schema;
   /// \brief Optional metadata to attach to written batches
   std::shared_ptr<const KeyValueMetadata> custom_metadata;
+  /// \brief Controls whether batches should be written immediately or sequenced in order
+  ///
+  /// \see QueryOptions for more details
+  std::optional<bool> sequence_output;
 };
 
 /// @}

@@ -34,10 +34,18 @@ namespace arrow {
 namespace acero {
 
 MapNode::MapNode(ExecPlan* plan, std::vector<ExecNode*> inputs,
-                 std::shared_ptr<Schema> output_schema)
+                 std::shared_ptr<Schema> output_schema, std::optional<bool> process_sequenced)
     : ExecNode(plan, std::move(inputs), /*input_labels=*/{"target"},
                std::move(output_schema)),
-      TracedNode(this) {}
+      TracedNode(this) {
+
+	bool explicit_sequencing = process_sequenced.has_value() && *process_sequenced;
+    bool sequencing_disabled = process_sequenced.has_value() && !*process_sequenced;
+    if (explicit_sequencing ||
+        (!sequencing_disabled && !inputs_[0]->ordering().is_unordered())) {
+      sequencer_ = util::SerialSequencingQueue::Make(this);
+    }		  
+}
 
 Status MapNode::InputFinished(ExecNode* input, int total_batches) {
   DCHECK_EQ(input, inputs_[0]);
@@ -71,7 +79,17 @@ Status MapNode::StopProducingImpl() { return Status::OK(); }
 Status MapNode::InputReceived(ExecNode* input, ExecBatch batch) {
   auto scope = TraceInputReceived(batch);
   DCHECK_EQ(input, inputs_[0]);
-  compute::Expression guarantee = batch.guarantee;
+  
+  if (sequencer_) {
+      ARROW_RETURN_NOT_OK(sequencer_->InsertBatch(std::move(batch)));
+  } else {
+      ARROW_RETURN_NOT_OK(Process(std::move(batch)));
+  }
+  return Status::OK();
+}
+
+Status MapNode::Process(ExecBatch batch){
+compute::Expression guarantee = batch.guarantee;
   int64_t index = batch.index;
   ARROW_ASSIGN_OR_RAISE(auto output_batch, ProcessBatch(std::move(batch)));
   output_batch.guarantee = guarantee;

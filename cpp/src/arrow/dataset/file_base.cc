@@ -540,7 +540,7 @@ Result<acero::ExecNode*> MakeWriteNode(acero::ExecPlan* plan,
   ARROW_ASSIGN_OR_RAISE(
       auto node,
       acero::MakeExecNode("consuming_sink", plan, std::move(inputs),
-                          acero::ConsumingSinkNodeOptions{std::move(consumer)}));
+                          acero::ConsumingSinkNodeOptions{std::move(consumer),{},write_node_options.sequence_output}));
 
   return node;
 }
@@ -551,8 +551,9 @@ class TeeNode : public acero::MapNode {
  public:
   TeeNode(acero::ExecPlan* plan, std::vector<acero::ExecNode*> inputs,
           std::shared_ptr<Schema> output_schema,
-          FileSystemDatasetWriteOptions write_options)
-      : MapNode(plan, std::move(inputs), std::move(output_schema)),
+          FileSystemDatasetWriteOptions write_options,
+		  std::optional<bool> sequence_output)
+      : MapNode(plan, std::move(inputs), std::move(output_schema),sequence_output),
         write_options_(std::move(write_options)) {}
 
   Status StartProducing() override {
@@ -575,7 +576,7 @@ class TeeNode : public acero::MapNode {
     const std::shared_ptr<Schema> schema = inputs[0]->output_schema();
 
     return plan->EmplaceNode<TeeNode>(plan, std::move(inputs), std::move(schema),
-                                      std::move(write_options));
+                                      std::move(write_options),write_node_options.sequence_output);
   }
 
   const char* kind_name() const override { return "TeeNode"; }

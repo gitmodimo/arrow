@@ -30,6 +30,7 @@
 #include "arrow/type_fwd.h"
 #include "arrow/util/cancel.h"
 #include "arrow/util/type_fwd.h"
+#include "arrow/acero/accumulation_queue.h"
 
 namespace arrow {
 namespace acero {
@@ -41,10 +42,12 @@ namespace acero {
 ///
 /// An AtomicCounter is used to keep track of when all data has arrived.  When it
 /// has the Finish() method will be invoked
-class ARROW_ACERO_EXPORT MapNode : public ExecNode, public TracedNode {
+class ARROW_ACERO_EXPORT MapNode : public ExecNode, 
+								   public TracedNode,
+								   public util::SerialSequencingQueue::Processor{
  public:
   MapNode(ExecPlan* plan, std::vector<ExecNode*> inputs,
-          std::shared_ptr<Schema> output_schema);
+          std::shared_ptr<Schema> output_schema, std::optional<bool> process_sequenced = std::nullopt);
 
   Status InputFinished(ExecNode* input, int total_batches) override;
 
@@ -55,6 +58,8 @@ class ARROW_ACERO_EXPORT MapNode : public ExecNode, public TracedNode {
   void ResumeProducing(ExecNode* output, int32_t counter) override;
 
   Status InputReceived(ExecNode* input, ExecBatch batch) override;
+  
+  Status Process(ExecBatch batch) override
 
   const Ordering& ordering() const override;
 
@@ -75,6 +80,7 @@ class ARROW_ACERO_EXPORT MapNode : public ExecNode, public TracedNode {
  protected:
   // Counter for the number of batches received
   AtomicCounter input_counter_;
+  std::unique_ptr<util::SerialSequencingQueue> sequencer_;
 };
 
 }  // namespace acero

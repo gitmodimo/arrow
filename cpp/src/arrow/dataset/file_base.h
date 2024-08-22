@@ -39,6 +39,9 @@
 namespace arrow {
 
 namespace dataset {
+	
+// This lines up with our other defaults in the scanner and execution plan
+constexpr uint64_t kDefaultDatasetWriterMaxRowsQueued = 8 * 1024 * 1024;
 
 /// \defgroup dataset-file-formats File formats for reading and writing datasets
 /// \defgroup dataset-filesystem File system datasets
@@ -483,6 +486,9 @@ class ARROW_DS_EXPORT WriteNodeOptions : public acero::ExecNodeOptions {
   std::shared_ptr<Schema> custom_schema;
   /// \brief Optional metadata to attach to written batches
   std::shared_ptr<const KeyValueMetadata> custom_metadata;
+  
+  uint64_t max_rows_queued = kDefaultDatasetWriterMaxRowsQueued;
+  
   /// \brief Controls whether batches should be written immediately or sequenced in order
   ///
   /// \see QueryOptions for more details

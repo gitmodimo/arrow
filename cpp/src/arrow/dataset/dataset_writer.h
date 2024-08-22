@@ -29,8 +29,7 @@ namespace arrow {
 namespace dataset {
 namespace internal {
 
-// This lines up with our other defaults in the scanner and execution plan
-constexpr uint64_t kDefaultDatasetWriterMaxRowsQueued = 8 * 1024 * 1024;
+
 
 /// \brief Utility class that manages a set of writers to different paths
 ///

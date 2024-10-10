@@ -502,6 +502,7 @@ class InputState: public util::SerialSequencingQueue::Processor{
       key_type_id_[k] = schema_->fields()[key_col_index_[k]]->type()->id();
     }
   }
+  virtual ~InputState() = default;
 
   static Result<std::unique_ptr<InputState>> Make(
       size_t index, TolType tolerance, bool must_hash, bool may_rehash,

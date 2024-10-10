@@ -1136,7 +1136,8 @@ class AsofJoinNode : public ExecNode {
 
   virtual ~AsofJoinNode() {
     process_.Push(false);  // poison pill
-    process_thread_.join();
+	if(process_thread_.joinable())
+		process_thread_.join();
   }
 
   const std::vector<col_index_t>& indices_of_on_key() { return indices_of_on_key_; }

@@ -1070,6 +1070,11 @@ Result<acero::ExecNode*> MakeScanNode(acero::ExecPlan* plan,
     }
   }
 
+  Ordering ordering = Ordering::Unordered();
+  if (implicit_ordering) {
+    ordering = Ordering::Implicit();
+  }
+
   return acero::MakeExecNode(
       "source", plan, {},
       acero::SourceNodeOptions{schema(std::move(fields)), std::move(gen), ordering});

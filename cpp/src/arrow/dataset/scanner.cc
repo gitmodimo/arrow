@@ -1061,7 +1061,8 @@ Result<acero::ExecNode*> MakeScanNode(acero::ExecPlan* plan,
         return batch;
       });
 
-  auto ordering = implicit_ordering ? Ordering::Implicit() : Ordering::Unordered();
+  auto ordering = require_sequenced_output || implicit_ordering ? Ordering::Implicit()
+                                                                : Ordering::Unordered();
 
   auto fields = scan_options->dataset_schema->fields();
   if (scan_options->add_augmented_fields) {

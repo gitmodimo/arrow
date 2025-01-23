@@ -218,7 +218,7 @@ class Gather : public GatherBaseCRTP<Gather<kValueWidthInBits, IndexCType, kWith
         out_(out),
         factor_(factor) {
     assert(zero_src_offset == 0);
-    assert(src && idx && out);
+    assert((src && idx && out) || (!src_length && !idx_length));
     assert((kWithFactor || factor == 1) &&
            "When kWithFactor is false, the factor is assumed to be 1 at compile time");
   }
@@ -266,7 +266,7 @@ class Gather</*kValueWidthInBits=*/1, IndexCType, /*kWithFactor=*/false>
         idx_length_(idx_length),
         idx_(idx),
         out_(out) {
-    assert(src && idx && out);
+    assert((src && idx && out) || (!src_length && !idx_length));
     assert(factor == 1 &&
            "factor != 1 is not supported when Gather is used to gather bits/booleans");
   }

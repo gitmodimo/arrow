@@ -26,9 +26,9 @@
 #include "arrow/acero/test_util_internal.h"
 #include "arrow/acero/util.h"
 #include "arrow/api.h"
-#include "arrow/compute/kernels/test_util.h"
 #include "arrow/compute/light_array_internal.h"
 #include "arrow/compute/row/row_encoder_internal.h"
+#include "arrow/compute/test_util_internal.h"
 #include "arrow/extension/uuid.h"
 #include "arrow/testing/extension_type.h"
 #include "arrow/testing/generator.h"
@@ -49,6 +49,7 @@ using compute::and_;
 using compute::call;
 using compute::default_exec_context;
 using compute::ExecBatchBuilder;
+using compute::ExecBatchFromJSON;
 using compute::ExecSpan;
 using compute::field_ref;
 using compute::SortIndices;
@@ -2350,7 +2351,7 @@ TEST(HashJoin, FineGrainedResidualFilter) {
         auto expected = ExecBatchFromJSON({utf8(), int32(), utf8()}, R"([
                             [null, null, "r_payload"],
                             [null, 0, "r_payload"],
-                            [null, 42, "r_payload"], 
+                            [null, 42, "r_payload"],
                             ["both1", null, "r_payload"],
                             ["both2", null, "r_payload"],
                             ["right_only", null, "r_payload"],
@@ -2519,7 +2520,7 @@ TEST(HashJoin, FineGrainedResidualFilter) {
         auto expected = ExecBatchFromJSON({utf8(), int32(), utf8()}, R"([
                             [null, null, "r_payload"],
                             [null, 0, "r_payload"],
-                            [null, 42, "r_payload"], 
+                            [null, 42, "r_payload"],
                             ["both1", null, "r_payload"],
                             ["both1", 0, "r_payload"],
                             ["both1", 42, "r_payload"],
@@ -2704,7 +2705,7 @@ TEST(HashJoin, FineGrainedResidualFilter) {
         auto expected = ExecBatchFromJSON({utf8(), int32(), utf8()}, R"([
                             [null, null, "r_payload"],
                             [null, 0, "r_payload"],
-                            [null, 42, "r_payload"], 
+                            [null, 42, "r_payload"],
                             ["right_only", null, "r_payload"],
                             ["right_only", 0, "r_payload"],
                             ["right_only", 42, "r_payload"]])");
@@ -2879,7 +2880,7 @@ TEST(HashJoin, FineGrainedResidualFilter) {
         auto expected = ExecBatchFromJSON({utf8(), int32(), utf8()}, R"([
                             [null, null, "r_payload"],
                             [null, 0, "r_payload"],
-                            [null, 42, "r_payload"], 
+                            [null, 42, "r_payload"],
                             ["both1", null, "r_payload"],
                             ["both1", 0, "r_payload"],
                             ["both2", null, "r_payload"],
@@ -3054,7 +3055,7 @@ TEST(HashJoin, FineGrainedResidualFilter) {
         auto expected = ExecBatchFromJSON({utf8(), int32(), utf8()}, R"([
                             [null, null, "r_payload"],
                             [null, 0, "r_payload"],
-                            [null, 42, "r_payload"], 
+                            [null, 42, "r_payload"],
                             ["both1", null, "r_payload"],
                             ["both2", null, "r_payload"],
                             ["right_only", null, "r_payload"],
@@ -3370,8 +3371,10 @@ TEST(HashJoin, LARGE_MEMORY_TEST(BuildSideOver4GBVarLength)) {
   constexpr int value_no_match_length_min = 128;
   constexpr int value_no_match_length_max = 129;
   constexpr int value_match_length = 130;
+  // The value "DDD..." will be hashed to the partition over 4GB of the hash table.
+  // Matching at this area gives us more coverage.
   const auto value_match =
-      std::make_shared<StringScalar>(std::string(value_match_length, 'X'));
+      std::make_shared<StringScalar>(std::string(value_match_length, 'D'));
   constexpr int16_t num_rows_per_batch_left = 128;
   constexpr int16_t num_rows_per_batch_right = 4096;
   const int64_t num_batches_left = 8;

@@ -406,8 +406,9 @@ struct SchemaSourceNode : public SourceNode {
 
 struct RecordBatchReaderSourceNode : public SourceNode {
   RecordBatchReaderSourceNode(ExecPlan* plan, std::shared_ptr<Schema> schema,
-                              arrow::AsyncGenerator<std::optional<ExecBatch>> generator)
-      : SourceNode(plan, schema, generator) {}
+                              arrow::AsyncGenerator<std::optional<ExecBatch>> generator,
+                              Ordering ordering = Ordering::Unordered())
+      : SourceNode(plan, schema, generator, ordering) {}
 
   static Result<ExecNode*> Make(ExecPlan* plan, std::vector<ExecNode*> inputs,
                                 const ExecNodeOptions& options) {
@@ -415,6 +416,7 @@ struct RecordBatchReaderSourceNode : public SourceNode {
     const auto& cast_options =
         checked_cast<const RecordBatchReaderSourceNodeOptions&>(options);
     auto& reader = cast_options.reader;
+    Ordering ordering = cast_options.implicit_ordering?Ordering::Implicit():Ordering::Unordered();
     auto io_executor = cast_options.io_executor;
 
     if (reader == nullptr) {
@@ -427,7 +429,7 @@ struct RecordBatchReaderSourceNode : public SourceNode {
 
     ARROW_ASSIGN_OR_RAISE(auto generator, MakeGenerator(reader, io_executor));
     return plan->EmplaceNode<RecordBatchReaderSourceNode>(plan, reader->schema(),
-                                                          generator);
+                                                          generator, ordering);
   }
 
   static Result<arrow::AsyncGenerator<std::optional<ExecBatch>>> MakeGenerator(

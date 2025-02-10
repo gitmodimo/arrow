@@ -202,20 +202,20 @@ class ARROW_ACERO_EXPORT RecordBatchReaderSourceNodeOptions : public ExecNodeOpt
   /// Create an instance from values
   RecordBatchReaderSourceNodeOptions(std::shared_ptr<RecordBatchReader> reader,
                                      arrow::internal::Executor* io_executor = NULLPTR,
-                                     bool implicit_ordering=false)
-      : reader(std::move(reader)), io_executor(io_executor),implicit_ordering(implicit_ordering) {}
+                                     bool implicit_ordering = false)
+      : reader(std::move(reader)),
+        io_executor(io_executor),
+        implicit_ordering(implicit_ordering) {}
 
   /// \brief The RecordBatchReader which acts as the data source
   std::shared_ptr<RecordBatchReader> reader;
-
 
   /// \brief The executor to use for the reader
   ///
   /// Defaults to the default I/O executor.
   arrow::internal::Executor* io_executor;
 
-  
-  bool implicit_ordering{false}; 
+  bool implicit_ordering{false};
 };
 
 /// a source node that reads from an iterator of array vectors

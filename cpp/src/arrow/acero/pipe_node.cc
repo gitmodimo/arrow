@@ -141,7 +141,7 @@ class PipeSinkNode : public ExecNode {
     return pipe_->InputFinished(total_batches);
   }
 
-  Status Init() { return pipe_->Init(inputs_[0]->output_schema()); }
+  Status Init() override { return pipe_->Init(inputs_[0]->output_schema()); }
 
   Status StartProducing() override { return Status::OK(); }
 
@@ -243,7 +243,8 @@ Status PipeSource::Validate(const Ordering& ordering) {
     return Status::Invalid("Pipe does not have sink");
   }
   if (!ordering.IsSuborderOf(pipe_->ordering()))
-    return Status::Invalid("Pipe source ordering is not subordering of pipe sink");
+    if (!(ordering.is_implicit() && pipe_->ordering().is_implicit()))
+      return Status::Invalid("Pipe source ordering is not subordering of pipe sink");
 
   return Status::OK();
 }

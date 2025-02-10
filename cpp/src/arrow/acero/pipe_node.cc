@@ -36,8 +36,6 @@ namespace arrow {
 
 using internal::checked_cast;
 
-using compute::FilterOptions;
-
 namespace acero {
 
 namespace {
@@ -66,6 +64,8 @@ struct PipeSourceNode : public PipeSource, public ExecNode {
   Status HandleInputFinished(int total_batches) override {
     return output_->InputFinished(this, total_batches);
   }
+
+  const Ordering& ordering() const override { return PipeSource::ordering(); }
 
   Status StartProducing() override {
     auto st = PipeSource::Validate();
@@ -112,7 +112,8 @@ class PipeSinkNode : public ExecNode {
       : ExecNode(plan, inputs, /*input_labels=*/{pipe_name}, {}) {
     pipe_ = std::make_shared<Pipe>(
         plan, std::move(pipe_name),
-        std::make_unique<PipeSinkBackpressureControl>(inputs[0], this));
+        std::make_unique<PipeSinkBackpressureControl>(inputs[0], this),
+        inputs[0]->ordering());
   }
 
   static Result<ExecNode*> Make(ExecPlan* plan, std::vector<ExecNode*> inputs,
@@ -239,9 +240,11 @@ Status PipeSource::Validate() {
   return Status::OK();
 }
 
+const Ordering& PipeSource::ordering() const { return pipe_->ordering(); }
+
 Pipe::Pipe(ExecPlan* plan, std::string pipe_name,
-           std::unique_ptr<BackpressureControl> ctrl)
-    : plan_(plan), pipe_name_(pipe_name), ctrl_(std::move(ctrl)) {}
+           std::unique_ptr<BackpressureControl> ctrl, Ordering ordering)
+    : plan_(plan), ordering_(ordering), pipe_name_(pipe_name), ctrl_(std::move(ctrl)) {}
 
 // Called from pipe_source nodes
 void Pipe::Pause(PipeSource* output, int counter) {
@@ -291,6 +294,8 @@ Status Pipe::InputFinished(int total_batches) {
   // No consumers registered;
   return Status::OK();
 }
+
+const Ordering& Pipe::ordering() const { return ordering_; }
 
 void Pipe::addSource(PipeSource* source) {
   source->Initialize(this);

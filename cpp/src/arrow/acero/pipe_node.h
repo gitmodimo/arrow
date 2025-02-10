@@ -26,7 +26,7 @@ namespace arrow {
 
 using internal::checked_cast;
 
-using compute::FilterOptions;
+using compute::Ordering;
 
 namespace acero {
 class Pipe;
@@ -37,6 +37,7 @@ class PipeSource {
   void Pause(int32_t counter);
   void Resume(int32_t counter);
   Status Validate();
+  const Ordering& ordering() const;
 
  private:
   friend class Pipe;
@@ -50,7 +51,8 @@ class PipeSource {
 
 class ARROW_ACERO_EXPORT Pipe {
  public:
-  Pipe(ExecPlan* plan, std::string pipe_name, std::unique_ptr<BackpressureControl> ctrl);
+  Pipe(ExecPlan* plan, std::string pipe_name, std::unique_ptr<BackpressureControl> ctrl,
+       Ordering ordering = Ordering::Unordered());
 
   // Called from pipe_source nodes
   void Pause(PipeSource* output, int counter);
@@ -63,6 +65,8 @@ class ARROW_ACERO_EXPORT Pipe {
   // Called from pipe_sink
   Status InputFinished(int total_batches);
 
+  const Ordering& ordering() const;
+
   void addSource(PipeSource* source);
 
   // Called from pipe_sink Init
@@ -71,6 +75,7 @@ class ARROW_ACERO_EXPORT Pipe {
  private:
   // pipe
   ExecPlan* plan_;
+  Ordering ordering_;
   std::string pipe_name_;
   std::vector<PipeSource*> source_nodes_;
   PipeSource* last_source_node_{nullptr};

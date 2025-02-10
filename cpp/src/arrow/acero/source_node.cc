@@ -416,7 +416,8 @@ struct RecordBatchReaderSourceNode : public SourceNode {
     const auto& cast_options =
         checked_cast<const RecordBatchReaderSourceNodeOptions&>(options);
     auto& reader = cast_options.reader;
-    Ordering ordering = cast_options.implicit_ordering?Ordering::Implicit():Ordering::Unordered();
+    Ordering ordering =
+        cast_options.implicit_ordering ? Ordering::Implicit() : Ordering::Unordered();
     auto io_executor = cast_options.io_executor;
 
     if (reader == nullptr) {

@@ -36,8 +36,7 @@ class PipeSource {
   virtual ~PipeSource() {}
   void Pause(int32_t counter);
   void Resume(int32_t counter);
-  Status Validate();
-  const Ordering& ordering() const;
+  Status Validate(const Ordering& ordering);
 
  private:
   friend class Pipe;
@@ -53,6 +52,8 @@ class ARROW_ACERO_EXPORT Pipe {
  public:
   Pipe(ExecPlan* plan, std::string pipe_name, std::unique_ptr<BackpressureControl> ctrl,
        Ordering ordering = Ordering::Unordered());
+
+  const Ordering& ordering() const;
 
   // Called from pipe_source nodes
   void Pause(PipeSource* output, int counter);

@@ -41,15 +41,19 @@ namespace acero {
 namespace {
 
 struct PipeSourceNode : public PipeSource, public ExecNode {
-  PipeSourceNode(ExecPlan* plan, std::shared_ptr<Schema> schema, std::string pipe_name)
-      : ExecNode(plan, {}, {}, std::move(schema)), pipe_name_(pipe_name) {}
+  PipeSourceNode(ExecPlan* plan, std::shared_ptr<Schema> schema, std::string pipe_name,
+                 Ordering ordering)
+      : ExecNode(plan, {}, {}, std::move(schema)),
+        pipe_name_(pipe_name),
+        ordering_(std::move(ordering)) {}
 
   static Result<ExecNode*> Make(ExecPlan* plan, std::vector<ExecNode*> inputs,
                                 const ExecNodeOptions& options) {
     RETURN_NOT_OK(ValidateExecNodeInputs(plan, inputs, 0, kKindName));
     const auto& pipe_source_options = checked_cast<const PipeSourceNodeOptions&>(options);
     return plan->EmplaceNode<PipeSourceNode>(plan, pipe_source_options.output_schema,
-                                             pipe_source_options.pipe_name);
+                                             pipe_source_options.pipe_name,
+                                             pipe_source_options.ordering);
   }
 
   [[noreturn]] static void NoInputs() {
@@ -65,10 +69,10 @@ struct PipeSourceNode : public PipeSource, public ExecNode {
     return output_->InputFinished(this, total_batches);
   }
 
-  const Ordering& ordering() const override { return PipeSource::ordering(); }
+  const Ordering& ordering() const override { return ordering_; }
 
   Status StartProducing() override {
-    auto st = PipeSource::Validate();
+    auto st = PipeSource::Validate(ordering());
     if (!st.ok()) {
       return st.WithMessage("Pipe '", pipe_name_, "' error: ", st.message());
     }
@@ -88,6 +92,7 @@ struct PipeSourceNode : public PipeSource, public ExecNode {
   const char* kind_name() const override { return kKindName; }
 
   const std::string pipe_name_;
+  Ordering ordering_;
 };
 
 const char PipeSourceNode::kKindName[] = "PipeSourceNode";
@@ -233,10 +238,13 @@ void PipeSource::Initialize(Pipe* pipe) { pipe_ = pipe; }
 void PipeSource::Pause(int32_t counter) { pipe_->Pause(this, counter); }
 void PipeSource::Resume(int32_t counter) { pipe_->Resume(this, counter); }
 
-Status PipeSource::Validate() {
+Status PipeSource::Validate(const Ordering& ordering) {
   if (!pipe_) {
     return Status::Invalid("Pipe does not have sink");
   }
+  if (!ordering.IsSuborderOf(pipe_->ordering()))
+    return Status::Invalid("Pipe source ordering is not subordering of pipe sink");
+
   return Status::OK();
 }
 
@@ -245,6 +253,8 @@ const Ordering& PipeSource::ordering() const { return pipe_->ordering(); }
 Pipe::Pipe(ExecPlan* plan, std::string pipe_name,
            std::unique_ptr<BackpressureControl> ctrl, Ordering ordering)
     : plan_(plan), ordering_(ordering), pipe_name_(pipe_name), ctrl_(std::move(ctrl)) {}
+
+const Ordering& Pipe::ordering() const { return ordering_; }
 
 // Called from pipe_source nodes
 void Pipe::Pause(PipeSource* output, int counter) {

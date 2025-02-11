@@ -43,25 +43,13 @@
 #include "arrow/util/thread_pool.h"
 #include "arrow/util/vector.h"
 
-// using testing::Contains;
-// using testing::ElementsAre;
-// using testing::ElementsAreArray;
 using testing::HasSubstr;
-// using testing::Optional;
-// using testing::UnorderedElementsAreArray;
 
 namespace arrow {
 
-// using compute::ArgShape;
-// using compute::call;
-// using compute::CountOptions;
+using compute::call;
 using compute::ExecBatchFromJSON;
 using compute::field_ref;
-// using compute::ScalarAggregateOptions;
-// using compute::SortKey;
-// using compute::SortOrder;
-// using compute::Take;
-// using compute::TDigestOptions;
 
 namespace acero {
 
@@ -143,6 +131,32 @@ TEST(ExecPlanExecution, PipeErrorSink) {
              HasSubstr("Pipe 'named_pipe_missing_sink' error: Pipe does not have sink")));
 }
 
+TEST(ExecPlanExecution, PipeErrorDuplicateSink) {
+  auto basic_data = MakeBasicBatches();
+
+  AsyncGenerator<std::optional<ExecBatch>> main_sink_gen;
+  AsyncGenerator<std::optional<ExecBatch>> dup_sink_gen;
+  Declaration decl = Declaration::Sequence(
+      {{"source", SourceNodeOptions{basic_data.schema, basic_data.gen(/*parallel=*/false,
+                                                                      /*slow=*/false)}},
+       {"pipe_tee", PipeSinkNodeOptions{"named_pipe_1"}},
+       {"pipe_tee", PipeSinkNodeOptions{"named_pipe_1"}},
+       {"sink", SinkNodeOptions{&main_sink_gen}}});
+
+  Declaration dup = Declaration::Sequence(
+      {{"pipe_source", PipeSourceNodeOptions{"named_pipe_1", basic_data.schema}},
+       {"sink", SinkNodeOptions{&dup_sink_gen}}});
+
+  // fail on planning
+  ASSERT_OK_AND_ASSIGN(auto plan, ExecPlan::Make());
+  ASSERT_OK(decl.AddToPlan(plan.get()));
+  ASSERT_OK(dup.AddToPlan(plan.get()));
+  plan->StartProducing();
+  ASSERT_THAT(
+      plan->finished().result().status(),
+      Raises(StatusCode::Invalid, HasSubstr("Pipe:named_pipe_1 has multiple sinks")));
+}
+
 TEST(ExecPlanExecution, PipeFilterSink) {
   auto basic_data = MakeBasicBatches();
   AsyncGenerator<std::optional<ExecBatch>> main_sink_gen;
@@ -167,8 +181,6 @@ TEST(ExecPlanExecution, PipeFilterSink) {
   dup1.label = "dup1";
 
   ASSERT_OK_AND_ASSIGN(auto plan, ExecPlan::Make());
-
-  ASSERT_GT(GetCpuThreadPoolCapacity(), 10);
   ASSERT_OK(decl.AddToPlan(plan.get()));
   ASSERT_OK(dup.AddToPlan(plan.get()));
   ASSERT_OK(dup1.AddToPlan(plan.get()));
@@ -179,7 +191,6 @@ TEST(ExecPlanExecution, PipeFilterSink) {
 
   ASSERT_EQ(exec_batches_vec.size(), 3);
 
-  // ASSERT_OK_AND_ASSIGN(auto result, DeclarationToExecBatches(std::move(plan)));
   auto exp_batches = {ExecBatchFromJSON({int32(), boolean()}, "[]"),
                       ExecBatchFromJSON({int32(), boolean()}, "[[6, false]]")};
   auto exp_dup1 = {ExecBatchFromJSON({int32(), boolean()}, "[[4, false]]"),
@@ -189,8 +200,54 @@ TEST(ExecPlanExecution, PipeFilterSink) {
   AssertExecBatchesEqualIgnoringOrder(basic_data.schema, basic_data.batches,
                                       exec_batches_vec[1]);
   AssertExecBatchesEqualIgnoringOrder(basic_data.schema, exp_dup1, exec_batches_vec[2]);
-  // AssertExecBatchesEqualIgnoringOrder(basic_data.schema, exec_batches_vec[1],
-  // exp_batches); ASSERT_EQ(1,0);
+}
+
+TEST(ExecPlanExecution, PipeMultiSchemaSink) {
+  auto basic_data = MakeBasicBatches();
+  AsyncGenerator<std::optional<ExecBatch>> main_sink_gen;
+  AsyncGenerator<std::optional<ExecBatch>> dup_sink_gen;
+  AsyncGenerator<std::optional<ExecBatch>> dup1_sink_gen;
+
+  Expression strbool =
+      call("if_else", {field_ref("bool"), literal("true"), literal("false")});
+
+  Declaration decl = Declaration::Sequence(
+      {{"source", SourceNodeOptions{basic_data.schema, basic_data.gen(/*parallel=*/false,
+                                                                      /*slow=*/false)}},
+       {"pipe_tee", PipeSinkNodeOptions{"named_pipe_1"}},
+       {"project", ProjectNodeOptions({strbool}, {"str"})},
+       {"pipe_tee", PipeSinkNodeOptions{"named_pipe_2"}},
+       {"sink", SinkNodeOptions{&main_sink_gen}}});
+
+  std::shared_ptr<Schema> schema_2 = schema({field("str", utf8())});
+  Declaration dup = Declaration::Sequence(
+      {{"pipe_source", PipeSourceNodeOptions{"named_pipe_1", basic_data.schema}},
+       {"sink", SinkNodeOptions{&dup_sink_gen}}});
+
+  Declaration dup1 = Declaration::Sequence(
+      {{"pipe_source", PipeSourceNodeOptions{"named_pipe_2", schema_2}},
+       {"sink", SinkNodeOptions{&dup1_sink_gen}}});
+  dup1.label = "dup1";
+
+  ASSERT_OK_AND_ASSIGN(auto plan, ExecPlan::Make());
+  ASSERT_OK(decl.AddToPlan(plan.get()));
+  ASSERT_OK(dup.AddToPlan(plan.get()));
+  ASSERT_OK(dup1.AddToPlan(plan.get()));
+  ASSERT_OK(plan->Validate());
+
+  std::vector<AsyncGenerator<std::optional<ExecBatch>>> gens = {
+      main_sink_gen, dup_sink_gen, dup1_sink_gen};
+  ASSERT_FINISHES_OK_AND_ASSIGN(auto exec_batches_vec, StartAndCollect(plan.get(), gens));
+
+  ASSERT_EQ(exec_batches_vec.size(), 3);
+
+  // ASSERT_OK_AND_ASSIGN(auto result, DeclarationToExecBatches(std::move(plan)));
+  auto exp_batches = {ExecBatchFromJSON({utf8()}, "[[\"true\"],[\"false\"]]"),
+                      ExecBatchFromJSON({utf8()}, "[[\"false\"],[\"false\"],[null]]")};
+  AssertExecBatchesEqualIgnoringOrder(schema_2, exp_batches, exec_batches_vec[0]);
+  AssertExecBatchesEqualIgnoringOrder(basic_data.schema, basic_data.batches,
+                                      exec_batches_vec[1]);
+  AssertExecBatchesEqualIgnoringOrder(schema_2, exp_batches, exec_batches_vec[2]);
 }
 
 TEST(ExecPlanExecution, PipeBackpressure) {
@@ -223,16 +280,14 @@ TEST(ExecPlanExecution, PipeBackpressure) {
                       .AddToPlan(plan.get()));
 
   SinkDesc dupSink;
-  ARROW_EXPECT_OK(
-      acero::Declaration::Sequence(
-          {
-              {"pipe_source", PipeSourceNodeOptions{"named_pipe_1", schema_}},
-              //{"filter", FilterNodeOptions{equal(field_ref("data"), literal(6))}},
-              {"sink",
-               SinkNodeOptions{&dupSink.sink_gen, /*schema=*/nullptr,
-                               backpressure_options, &dupSink.backpressure_monitor}},
-          })
-          .AddToPlan(plan.get()));
+  ARROW_EXPECT_OK(acero::Declaration::Sequence(
+                      {
+                          {"pipe_source", PipeSourceNodeOptions{"named_pipe_1", schema_}},
+                          {"sink", SinkNodeOptions{&dupSink.sink_gen, /*schema=*/nullptr,
+                                                   backpressure_options,
+                                                   &dupSink.backpressure_monitor}},
+                      })
+                      .AddToPlan(plan.get()));
 
   SinkDesc dup1Sink;
   ARROW_EXPECT_OK(

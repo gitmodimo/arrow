@@ -239,8 +239,8 @@ Status PipeSource::Validate(const Ordering& ordering) {
   if (!pipe_) {
     return Status::Invalid("Pipe does not have sink");
   }
-  if (!pipe_->ordering().IsSuborderOf(ordering))
-    if (!(ordering.is_implicit() && pipe_->ordering().is_implicit()))
+  if (!ordering.IsSuborderOf(pipe_->ordering()))
+    if (!(ordering.is_implicit() && !pipe_->ordering().is_unordered()))
       return Status::Invalid("Pipe source ordering is not subordering of pipe sink");
 
   return Status::OK();

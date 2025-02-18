@@ -897,7 +897,11 @@ class ARROW_ACERO_EXPORT PipeSourceNodeOptions : public ExecNodeOptions {
 
 class ARROW_ACERO_EXPORT PipeSinkNodeOptions : public ExecNodeOptions {
  public:
-  PipeSinkNodeOptions(std::string pipe_name) : pipe_name(std::move(pipe_name)) {}
+  PipeSinkNodeOptions(std::string pipe_name, bool pause_on_any = true,
+                      bool stop_on_any = false)
+      : pipe_name(std::move(pipe_name)),
+        pause_on_any(pause_on_any),
+        stop_on_any(stop_on_any) {}
 
   /// \brief Pipe name used to match with pipe sources
   std::string pipe_name;
@@ -905,12 +909,12 @@ class ARROW_ACERO_EXPORT PipeSinkNodeOptions : public ExecNodeOptions {
   /// \brief pause_on_any controls pausing strategy. If true sink input will be paused
   /// when any source is paused. If false sink input will be paused hen all sources are
   /// paused
-  bool pause_on_any{true};
+  bool pause_on_any;
 
   /// \brief stop_on_any controls stopping strategy. If true sink input will be stopped
   /// when any source is stopped. If false sink input will be stopped hen all sources are
   /// stopped
-  bool stop_on_any{false};
+  bool stop_on_any;
 };
 
 /// @}

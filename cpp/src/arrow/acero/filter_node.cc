@@ -33,7 +33,11 @@ namespace arrow {
 
 using internal::checked_cast;
 
+using compute::and_;
+using compute::field_ref;
 using compute::FilterOptions;
+using compute::is_null;
+using compute::not_;
 
 namespace acero {
 namespace {
@@ -51,13 +55,33 @@ class FilterNode : public MapNode {
     auto schema = inputs[0]->output_schema();
 
     const auto& filter_options = checked_cast<const FilterNodeOptions&>(options);
+    Expression filter_expression;
+    if (!filter_options.filter_not_null.empty()) {
+      std::vector<Expression> operands = {filter_options.filter_expression};
+      for (const auto& c : filter_options.filter_not_null) {
+        auto field_index = schema->GetFieldIndex(c);
+        if (field_index == -1) {
+          return Status::KeyError("Column not found: ", c);
+        }
+        auto& field = schema->field(field_index);
+        if (field->nullable()) {
+          ARROW_ASSIGN_OR_RAISE(
+              schema, schema->SetField(field_index, field->WithNullable(false)));
+        }
+        operands.push_back(not_(is_null(field_ref(c))));
+      }
+      filter_expression = and_(operands);
+    } else {
+      filter_expression = filter_options.filter_expression;
+    }
 
-    auto filter_expression = filter_options.filter_expression;
     if (!filter_expression.IsBound()) {
       ARROW_ASSIGN_OR_RAISE(
           filter_expression,
           filter_expression.Bind(*schema, plan->query_context()->exec_context()));
     }
+
+    std::vector<std::string> filter_not_null;
 
     if (filter_expression.type()->id() != Type::BOOL) {
       return Status::TypeError("Filter expression must evaluate to bool, but ",

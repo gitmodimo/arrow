@@ -30,10 +30,8 @@
 #include "arrow/compute/api_vector.h"
 #include "arrow/compute/exec.h"
 #include "arrow/compute/expression.h"
-#include "arrow/record_batch.h"
 #include "arrow/result.h"
-#include "arrow/util/async_generator.h"
-#include "arrow/util/async_util.h"
+#include "arrow/util/future.h"
 
 namespace arrow {
 
@@ -56,7 +54,7 @@ namespace acero {
 /// \brief This must not be used in release-mode
 struct DebugOptions;
 
-using AsyncExecBatchGenerator = AsyncGenerator<std::optional<ExecBatch>>;
+using AsyncExecBatchGenerator = std::function<Future<std::optional<ExecBatch>>()>;
 
 /// \addtogroup acero-nodes
 /// @{
@@ -258,13 +256,18 @@ class ARROW_ACERO_EXPORT RecordBatchSourceNodeOptions
 class ARROW_ACERO_EXPORT FilterNodeOptions : public ExecNodeOptions {
  public:
   /// \brief create an instance from values
-  explicit FilterNodeOptions(Expression filter_expression)
-      : filter_expression(std::move(filter_expression)) {}
+  explicit FilterNodeOptions(Expression filter_expression,
+                             std::vector<std::string> filter_not_null = {})
+      : filter_expression(std::move(filter_expression)),
+        filter_not_null(std::move(filter_not_null)) {}
 
   /// \brief the expression to filter batches
   ///
   /// The return type of this expression must be boolean
   Expression filter_expression;
+
+  /// \brief filter out null values from selected columns and assert not null in schema
+  std::vector<std::string> filter_not_null;
 };
 
 /// \brief a node which selects a specified subset from the input

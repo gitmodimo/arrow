@@ -43,6 +43,17 @@ Mutex::Guard::Guard(Mutex* locked)
       }) {
 }
 
+void Mutex::Guard::wait(std::condition_variable& cond) {
+  std::unique_lock lock(locked_->impl_->mutex_, std::adopt_lock);
+  cond.wait(lock);
+  lock.release();
+}
+void Mutex::Guard::wait(std::condition_variable& cond, std::function<bool()> pred) {
+  std::unique_lock lock(locked_->impl_->mutex_, std::adopt_lock);
+  cond.wait(lock, pred);
+  lock.release();
+}
+
 Mutex::Guard Mutex::TryLock() {
   DCHECK_NE(impl_, nullptr);
   if (impl_->mutex_.try_lock()) {

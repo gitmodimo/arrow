@@ -18,9 +18,9 @@
 #pragma once
 
 #include <condition_variable>
-#include <mutex>
 #include <queue>
 #include "arrow/acero/backpressure_handler.h"
+#include "arrow/util/mutex.h"
 
 namespace arrow::acero {
 
@@ -34,32 +34,32 @@ class ConcurrentQueue {
   // Pops the last item from the queue but waits if the queue is empty until new items are
   // pushed.
   T WaitAndPop() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    WaitUntilNonEmpty(lock);
+    arrow::util::Mutex::Guard guard = mutex_.Lock();
+    WaitUntilNonEmpty(guard);
     return PopUnlocked();
   }
 
   // Pops the last item from the queue, or returns a nullopt if empty
   std::optional<T> TryPop() {
-    std::unique_lock<std::mutex> lock(mutex_);
+    arrow::util::Mutex::Guard guard = mutex_.Lock();
     return TryPopUnlocked();
   }
 
   // Pushes an item to the queue
   void Push(const T& item) {
-    std::unique_lock<std::mutex> lock(mutex_);
+    arrow::util::Mutex::Guard guard = mutex_.Lock();
     return PushUnlocked(item);
   }
 
   // Clears the queue
   void Clear() {
-    std::unique_lock<std::mutex> lock(mutex_);
+    arrow::util::Mutex::Guard guard = mutex_.Lock();
     ClearUnlocked();
   }
 
   // Checks if the queue is empty
   bool Empty() const {
-    std::unique_lock<std::mutex> lock(mutex_);
+    arrow::util::Mutex::Guard guard = mutex_.Lock();
     return queue_.empty();
   }
 
@@ -69,17 +69,17 @@ class ConcurrentQueue {
     // Need to lock the queue because `front()` may be implemented in terms
     // of `begin()`, which isn't safe with concurrent calls to e.g. `push()`.
     // (see GH-44846)
-    std::unique_lock<std::mutex> lock(mutex_);
+    arrow::util::Mutex::Guard guard = mutex_.Lock();
     return queue_.front();
   }
 
  protected:
-  std::mutex& GetMutex() { return mutex_; }
+  arrow::util::Mutex::Guard Lock() { return mutex_.Lock(); }
 
   size_t SizeUnlocked() const { return queue_.size(); }
 
-  void WaitUntilNonEmpty(std::unique_lock<std::mutex>& lock) {
-    cond_.wait(lock, [&] { return !queue_.empty(); });
+  void WaitUntilNonEmpty(arrow::util::Mutex::Guard& guard) {
+    guard.wait(cond_, [&] { return !queue_.empty(); });
   }
 
   T PopUnlocked() {
@@ -108,7 +108,7 @@ class ConcurrentQueue {
   std::queue<T> queue_;
 
  private:
-  mutable std::mutex mutex_;
+  mutable arrow::util::Mutex mutex_;
   std::condition_variable cond_;
 };
 
@@ -137,29 +137,29 @@ class BackpressureConcurrentQueue : public ConcurrentQueue<T> {
   // Pops the last item from the queue but waits if the queue is empty until new items are
   // pushed.
   T WaitAndPop() {
-    std::unique_lock<std::mutex> lock(ConcurrentQueue<T>::GetMutex());
-    ConcurrentQueue<T>::WaitUntilNonEmpty(lock);
+    arrow::util::Mutex::Guard guard = ConcurrentQueue<T>::Lock();
+    ConcurrentQueue<T>::WaitUntilNonEmpty(guard);
     DoHandle do_handle(*this);
     return ConcurrentQueue<T>::PopUnlocked();
   }
 
   // Pops the last item from the queue, or returns a nullopt if empty
   std::optional<T> TryPop() {
-    std::unique_lock<std::mutex> lock(ConcurrentQueue<T>::GetMutex());
+    arrow::util::Mutex::Guard guard = ConcurrentQueue<T>::Lock();
     DoHandle do_handle(*this);
     return ConcurrentQueue<T>::TryPopUnlocked();
   }
 
   // Pushes an item to the queue
   void Push(const T& item) {
-    std::unique_lock<std::mutex> lock(ConcurrentQueue<T>::GetMutex());
+    arrow::util::Mutex::Guard guard = ConcurrentQueue<T>::Lock();
     DoHandle do_handle(*this);
     ConcurrentQueue<T>::PushUnlocked(item);
   }
 
   // Clears the queue
   void Clear() {
-    std::unique_lock<std::mutex> lock(ConcurrentQueue<T>::GetMutex());
+    arrow::util::Mutex::Guard guard = ConcurrentQueue<T>::Lock();
     DoHandle do_handle(*this);
     ConcurrentQueue<T>::ClearUnlocked();
   }

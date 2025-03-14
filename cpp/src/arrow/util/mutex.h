@@ -17,8 +17,9 @@
 
 #pragma once
 
+#include <condition_variable>
+#include <functional>
 #include <memory>
-
 #include "arrow/util/macros.h"
 #include "arrow/util/visibility.h"
 
@@ -44,6 +45,9 @@ class ARROW_EXPORT Mutex {
     explicit operator bool() const { return bool(locked_); }
 
     void Unlock() { locked_.reset(); }
+
+    void wait(std::condition_variable& cond);
+    void wait(std::condition_variable& cond, std::function<bool()> pred);
 
    private:
     explicit Guard(Mutex* locked);

@@ -1788,5 +1788,168 @@ TEST(ExecPlanExecution, UnalignedInput) {
   ASSERT_LT(initial_bytes_allocated, default_memory_pool()->total_bytes_allocated());
 }
 
+struct ExecPlanErrorReporting : public testing::TestWithParam<DummyNodeStatusReporter> {};
+
+TEST_P(ExecPlanErrorReporting, SourceSink) {
+  ASSERT_OK_AND_ASSIGN(auto plan, ExecPlan::Make());
+  auto source = MakeDummyNode(plan.get(), "source", /*inputs=*/{}, /*is_sink=*/false,
+                              /*start_producing =*/{},
+                              /*stop_producing =*/{},
+                              /*status_reporter =*/GetParam());
+  auto sink = MakeDummyNode(plan.get(), "sink", /*inputs=*/{source}, /*is_sink=*/true,
+                            /*start_producing =*/{},
+                            /*stop_producing =*/{},
+                            /*status_reporter =*/GetParam());
+
+  ASSERT_OK(plan->Validate());
+  EXPECT_THAT(plan->nodes(), ElementsAre(source, sink));
+
+  bool should_finish = GetParam().start_producing.ok();
+  plan->StartProducing();
+  SleepABit();
+  if (should_finish)
+    ASSERT_FINISHES_OK(plan->finished());
+  else
+    ASSERT_FINISHES_AND_RAISES(Invalid, plan->finished());
+}
+
+TEST_P(ExecPlanErrorReporting, InputReceived) {
+  ASSERT_OK_AND_ASSIGN(auto plan, ExecPlan::Make());
+  auto basic_data = MakeBasicBatches();
+
+  ASSERT_OK_AND_ASSIGN(
+      auto source,
+      Declaration("source",
+                  SourceNodeOptions{basic_data.schema, basic_data.gen(/*parallel=*/false,
+                                                                      /*slow=*/false)})
+          .AddToPlan(plan.get()));
+
+  MakeDummyNode(plan.get(), "sink", /*inputs=*/{source}, /*is_sink=*/true,
+                /*start_producing =*/{},
+                /*stop_producing =*/{},
+                /*status_reporter =*/GetParam());
+
+  bool should_finish = GetParam().start_producing.ok() &&
+                       GetParam().input_received.ok() && GetParam().input_finished.ok();
+  plan->StartProducing();
+  SleepABit();
+  if (should_finish)
+    ASSERT_FINISHES_OK(plan->finished());
+  else
+    ASSERT_FINISHES_AND_RAISES(Invalid, plan->finished());
+}
+
+TEST_P(ExecPlanErrorReporting, Finish) {
+  std::shared_ptr<Schema> schema_ = schema({field("data", uint32())});
+  std::optional<ExecBatch> batch =
+      ExecBatchFromJSON({int32(), boolean()},
+                        "[[4, false], [5, null], [6, false], [7, false], [null, true]]");
+  PushGenerator<std::optional<ExecBatch>> batch_producer;
+  ASSERT_OK_AND_ASSIGN(auto plan, ExecPlan::Make());
+  auto basic_data = MakeBasicBatches();
+
+  ASSERT_OK_AND_ASSIGN(auto source,
+                       Declaration("source", SourceNodeOptions(schema_, batch_producer))
+                           .AddToPlan(plan.get()));
+
+  MakeDummyNode(plan.get(), "sink", /*inputs=*/{source}, /*is_sink=*/true,
+                /*start_producing =*/{},
+                /*stop_producing =*/{},
+                /*status_reporter =*/GetParam());
+
+  bool should_start = GetParam().start_producing.ok();
+  plan->StartProducing();
+  SleepABit();
+  if (should_start) {
+    ASSERT_FALSE(plan->finished().is_finished());
+  } else {
+    ASSERT_FINISHES_AND_RAISES(Invalid, plan->finished());
+  }
+  batch_producer.producer().Push(batch);
+  SleepABit();
+
+  bool should_receive = should_start && GetParam().input_received.ok();
+  if (should_receive) {
+    ASSERT_FALSE(plan->finished().is_finished());
+  } else {
+    ASSERT_FINISHES_AND_RAISES(Invalid, plan->finished());
+  }
+
+  batch_producer.producer().Push(std::nullopt);
+  SleepABit();
+  bool should_finish = should_receive && GetParam().input_finished.ok();
+  if (should_finish) {
+    ASSERT_FINISHES_OK(plan->finished());
+  } else {
+    ASSERT_FINISHES_AND_RAISES(Invalid, plan->finished());
+    return;
+  }
+}
+
+TEST_P(ExecPlanErrorReporting, StopProducing) {
+  std::shared_ptr<Schema> schema_ = schema({field("data", uint32())});
+  std::optional<ExecBatch> batch =
+      ExecBatchFromJSON({int32(), boolean()},
+                        "[[4, false], [5, null], [6, false], [7, false], [null, true]]");
+  PushGenerator<std::optional<ExecBatch>> batch_producer;
+  ASSERT_OK_AND_ASSIGN(auto plan, ExecPlan::Make());
+  auto basic_data = MakeBasicBatches();
+
+  ASSERT_OK_AND_ASSIGN(auto source,
+                       Declaration("source", SourceNodeOptions(schema_, batch_producer))
+                           .AddToPlan(plan.get()));
+
+  MakeDummyNode(plan.get(), "sink", /*inputs=*/{source}, /*is_sink=*/true,
+                /*start_producing =*/{},
+                /*stop_producing =*/{},
+                /*status_reporter =*/GetParam());
+
+  bool should_start = GetParam().start_producing.ok();
+  plan->StartProducing();
+  SleepABit();
+  if (should_start) {
+    ASSERT_FALSE(plan->finished().is_finished());
+  } else {
+    ASSERT_FINISHES_AND_RAISES(Invalid, plan->finished());
+  }
+  batch_producer.producer().Push(batch);
+  SleepABit();
+
+  bool should_receive = should_start && GetParam().input_received.ok();
+  if (should_receive) {
+    ASSERT_FALSE(plan->finished().is_finished());
+  } else {
+    ASSERT_FINISHES_AND_RAISES(Invalid, plan->finished());
+  }
+  // this should not be needed
+  batch_producer.producer().Push(std::nullopt);
+  SleepABit();
+  plan->StopProducing();
+  SleepABit();
+  bool should_stop =
+      should_receive && GetParam().stop_producing.ok() && GetParam().input_finished.ok();
+  if (should_stop) {
+    ASSERT_FINISHES_AND_RAISES(Cancelled, plan->finished());
+  } else {
+    ASSERT_FINISHES_AND_RAISES(Invalid, plan->finished());
+    return;
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ExecPlan, ExecPlanErrorReporting,
+    testing::Values(DummyNodeStatusReporter{Status::OK(), Status::OK(), Status::OK(),
+                                            Status::OK()},
+                    DummyNodeStatusReporter{Status::Invalid("1"), Status::OK(),
+                                            Status::OK(), Status::OK()},
+                    DummyNodeStatusReporter{Status::OK(), Status::Invalid("1"),
+                                            Status::OK(), Status::OK()},
+                    DummyNodeStatusReporter{Status::OK(), Status::OK(),
+                                            Status::Invalid("1"), Status::OK()},
+                    DummyNodeStatusReporter{Status::OK(), Status::OK(), Status::OK(),
+                                            Status::Invalid("1")},
+                    DummyNodeStatusReporter{Status::Invalid("1"), Status::Invalid("1"),
+                                            Status::Invalid("1"), Status::Invalid("1")}));
+
 }  // namespace acero
 }  // namespace arrow

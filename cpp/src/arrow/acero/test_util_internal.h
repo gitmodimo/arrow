@@ -45,9 +45,16 @@ using StartProducingFunc = std::function<Status(ExecNode*)>;
 using StopProducingFunc = std::function<void(ExecNode*)>;
 
 // Make a dummy node that has no execution behaviour
+struct DummyNodeStatusReporter {
+  Status input_received;
+  Status input_finished;
+  Status start_producing;
+  Status stop_producing;
+};
 ExecNode* MakeDummyNode(ExecPlan* plan, std::string label, std::vector<ExecNode*> inputs,
                         bool is_sink = false, StartProducingFunc = {},
-                        StopProducingFunc = {});
+                        StopProducingFunc = {},
+                        DummyNodeStatusReporter status_reporter = {});
 
 struct BatchesWithSchema {
   std::vector<ExecBatch> batches;

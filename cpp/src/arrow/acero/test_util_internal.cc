@@ -75,10 +75,12 @@ namespace {
 
 struct DummyNode : ExecNode {
   DummyNode(ExecPlan* plan, NodeVector inputs, bool is_sink,
-            StartProducingFunc start_producing, StopProducingFunc stop_producing)
+            StartProducingFunc start_producing, StopProducingFunc stop_producing,
+            DummyNodeStatusReporter status_reporter)
       : ExecNode(plan, std::move(inputs), {}, (is_sink) ? nullptr : dummy_schema()),
         start_producing_(std::move(start_producing)),
-        stop_producing_(std::move(stop_producing)) {
+        stop_producing_(std::move(stop_producing)),
+        status_reporter_(status_reporter) {
     input_labels_.resize(inputs_.size());
     for (size_t i = 0; i < input_labels_.size(); ++i) {
       input_labels_[i] = std::to_string(i);
@@ -87,10 +89,12 @@ struct DummyNode : ExecNode {
 
   const char* kind_name() const override { return "Dummy"; }
 
-  Status InputReceived(ExecNode* input, ExecBatch batch) override { return Status::OK(); }
+  Status InputReceived(ExecNode* input, ExecBatch batch) override {
+    return status_reporter_.input_received;
+  }
 
   Status InputFinished(ExecNode* input, int total_batches) override {
-    return Status::OK();
+    return status_reporter_.input_finished;
   }
 
   Status StartProducing() override {
@@ -98,7 +102,7 @@ struct DummyNode : ExecNode {
       RETURN_NOT_OK(start_producing_(this));
     }
     started_ = true;
-    return Status::OK();
+    return status_reporter_.start_producing;
   }
 
   void PauseProducing(ExecNode* output, int32_t counter) override {
@@ -115,7 +119,7 @@ struct DummyNode : ExecNode {
     if (stop_producing_) {
       stop_producing_(this);
     }
-    return Status::OK();
+    return status_reporter_.stop_producing;
   }
 
  private:
@@ -127,6 +131,7 @@ struct DummyNode : ExecNode {
 
   StartProducingFunc start_producing_;
   StopProducingFunc stop_producing_;
+  DummyNodeStatusReporter status_reporter_;
   std::unordered_set<ExecNode*> requested_stop_;
   bool started_ = false;
 };
@@ -135,10 +140,11 @@ struct DummyNode : ExecNode {
 
 ExecNode* MakeDummyNode(ExecPlan* plan, std::string label, std::vector<ExecNode*> inputs,
                         bool is_sink, StartProducingFunc start_producing,
-                        StopProducingFunc stop_producing) {
-  auto node =
-      plan->EmplaceNode<DummyNode>(plan, std::move(inputs), is_sink,
-                                   std::move(start_producing), std::move(stop_producing));
+                        StopProducingFunc stop_producing,
+                        DummyNodeStatusReporter status_reporter) {
+  auto node = plan->EmplaceNode<DummyNode>(
+      plan, std::move(inputs), is_sink, std::move(start_producing),
+      std::move(stop_producing), std::move(status_reporter));
   if (!label.empty()) {
     node->SetLabel(std::move(label));
   }

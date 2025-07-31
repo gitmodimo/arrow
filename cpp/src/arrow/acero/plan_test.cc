@@ -1790,8 +1790,6 @@ TEST(ExecPlanExecution, UnalignedInput) {
 
 struct ExecPlanErrorReporting : public testing::TestWithParam<DummyNodeStatusReporter> {};
 
-#pragma GCC push_options
-#pragma GCC optimize("O0")
 TEST_P(ExecPlanErrorReporting, SourceSink) {
   ASSERT_OK_AND_ASSIGN(auto plan, ExecPlan::Make());
   auto source = MakeDummyNode(plan.get(), "source", /*inputs=*/{}, /*is_sink=*/false,
@@ -1952,8 +1950,6 @@ INSTANTIATE_TEST_SUITE_P(
                                             Status::Invalid("1")},
                     DummyNodeStatusReporter{Status::Invalid("1"), Status::Invalid("1"),
                                             Status::Invalid("1"), Status::Invalid("1")}));
-
-#pragma GCC pop_options
 
 }  // namespace acero
 }  // namespace arrow

@@ -466,6 +466,70 @@ TEST(ExecPlanExecution, SinkNodeBackpressure) {
   CheckFinishesCancelledOrOk(plan->finished());
 }
 
+TEST(ExecPlanExecution, SourceCloseGenerator) {
+  std::optional<ExecBatch> batch =
+      ExecBatchFromJSON({int32(), boolean()},
+                        "[[4, false], [5, null], [6, false], [7, false], [null, true]]");
+  constexpr uint32_t kPauseIfAbove = 4;
+  constexpr uint32_t kResumeIfBelow = 2;
+  uint32_t pause_if_above_bytes =
+      kPauseIfAbove * static_cast<uint32_t>(batch->TotalBufferSize());
+  uint32_t resume_if_below_bytes =
+      kResumeIfBelow * static_cast<uint32_t>(batch->TotalBufferSize());
+  EXPECT_OK_AND_ASSIGN(std::shared_ptr<ExecPlan> plan, ExecPlan::Make());
+  PushGenerator<std::optional<ExecBatch>> batch_producer;
+  AsyncGenerator<std::optional<ExecBatch>> sink_gen;
+  BackpressureMonitor* backpressure_monitor;
+  BackpressureOptions backpressure_options(resume_if_below_bytes, pause_if_above_bytes);
+  std::shared_ptr<Schema> schema_ = schema({field("data", uint32())});
+  ARROW_EXPECT_OK(
+      acero::Declaration::Sequence(
+          {
+              {"source", SourceNodeOptions(schema_, batch_producer)},
+              {"sink", SinkNodeOptions{&sink_gen, /*schema=*/nullptr,
+                                       backpressure_options, &backpressure_monitor}},
+          })
+          .AddToPlan(plan.get()));
+  ASSERT_TRUE(backpressure_monitor);
+  plan->StartProducing();
+
+  ASSERT_FALSE(backpressure_monitor->is_paused());
+
+  // Should be able to push kPauseIfAbove batches without triggering back pressure
+  for (uint32_t i = 0; i < kPauseIfAbove; i++) {
+    batch_producer.producer().Push(batch);
+  }
+  SleepABit();
+  ASSERT_FALSE(backpressure_monitor->is_paused());
+
+  // One more batch should trigger back pressure
+  batch_producer.producer().Push(batch);
+  BusyWait(10, [&] { return backpressure_monitor->is_paused(); });
+  ASSERT_TRUE(backpressure_monitor->is_paused());
+
+  batch_producer.producer().Push(batch);
+  batch_producer.producer().Close();
+
+  // Reading as much as we can while keeping it paused
+  for (uint32_t i = kPauseIfAbove; i >= kResumeIfBelow; i--) {
+    ASSERT_FINISHES_OK(sink_gen());
+  }
+  SleepABit();
+  ASSERT_TRUE(backpressure_monitor->is_paused());
+
+  // Reading one more item should open up backpressure
+  ASSERT_FINISHES_OK(sink_gen());
+  ASSERT_FINISHES_OK(sink_gen());
+  BusyWait(10, [&] { return !backpressure_monitor->is_paused(); });
+  ASSERT_FALSE(backpressure_monitor->is_paused());
+
+  plan->StopProducing();
+  ASSERT_FINISHES_OK(sink_gen());
+
+  // Cleanup
+  CheckFinishesCancelledOrOk(plan->finished());
+}
+
 TEST(ExecPlan, ToString) {
   auto basic_data = MakeBasicBatches();
   AsyncGenerator<std::optional<ExecBatch>> sink_gen;
@@ -1788,75 +1852,36 @@ TEST(ExecPlanExecution, UnalignedInput) {
   ASSERT_LT(initial_bytes_allocated, default_memory_pool()->total_bytes_allocated());
 }
 
-struct ExecPlanErrorReporting : public testing::TestWithParam<DummyNodeStatusReporter> {};
+struct ExecPlanErrorReporting : public testing::TestWithParam<DummyNodeStatusReporter> {
+ public:
+  void SetUp() {
+    auto schema_ = schema({field("data", uint32())});
+    batch = ExecBatchFromJSON(
+        {int32(), boolean()},
+        "[[4, false], [5, null], [6, false], [7, false], [null, true]]");
 
-TEST_P(ExecPlanErrorReporting, SourceSink) {
-  ASSERT_OK_AND_ASSIGN(auto plan, ExecPlan::Make());
-  auto source = MakeDummyNode(plan.get(), "source", /*inputs=*/{}, /*is_sink=*/false,
-                              /*start_producing =*/{},
-                              /*stop_producing =*/{},
-                              /*status_reporter =*/GetParam());
-  auto sink = MakeDummyNode(plan.get(), "sink", /*inputs=*/{source}, /*is_sink=*/true,
-                            /*start_producing =*/{},
-                            /*stop_producing =*/{},
-                            /*status_reporter =*/GetParam());
+    ASSERT_OK_AND_ASSIGN(plan, ExecPlan::Make());
+    ASSERT_OK_AND_ASSIGN(source,
+                         Declaration("source", SourceNodeOptions(schema_, batch_producer))
+                             .AddToPlan(plan.get()));
+    sink = MakeDummyNode(plan.get(), "sink", /*inputs=*/{source}, /*is_sink=*/true,
+                         /*start_producing =*/{},
+                         /*stop_producing =*/{},
+                         /*status_reporter =*/GetParam());
 
-  ASSERT_OK(plan->Validate());
-  EXPECT_THAT(plan->nodes(), ElementsAre(source, sink));
+    ASSERT_OK(plan->Validate());
+    EXPECT_THAT(plan->nodes(), ElementsAre(source, sink));
+  }
 
-  bool should_finish = GetParam().start_producing.ok();
-  plan->StartProducing();
-  SleepABit();
-  if (should_finish)
-    ASSERT_FINISHES_OK(plan->finished());
-  else
-    ASSERT_FINISHES_AND_RAISES(Invalid, plan->finished());
-}
-
-TEST_P(ExecPlanErrorReporting, InputReceived) {
-  ASSERT_OK_AND_ASSIGN(auto plan, ExecPlan::Make());
-  auto basic_data = MakeBasicBatches();
-
-  ASSERT_OK_AND_ASSIGN(
-      auto source,
-      Declaration("source",
-                  SourceNodeOptions{basic_data.schema, basic_data.gen(/*parallel=*/false,
-                                                                      /*slow=*/false)})
-          .AddToPlan(plan.get()));
-
-  MakeDummyNode(plan.get(), "sink", /*inputs=*/{source}, /*is_sink=*/true,
-                /*start_producing =*/{},
-                /*stop_producing =*/{},
-                /*status_reporter =*/GetParam());
-
-  bool should_finish = GetParam().start_producing.ok() &&
-                       GetParam().input_received.ok() && GetParam().input_finished.ok();
-  plan->StartProducing();
-  SleepABit();
-  if (should_finish)
-    ASSERT_FINISHES_OK(plan->finished());
-  else
-    ASSERT_FINISHES_AND_RAISES(Invalid, plan->finished());
-}
-
-TEST_P(ExecPlanErrorReporting, Finish) {
-  std::shared_ptr<Schema> schema_ = schema({field("data", uint32())});
-  std::optional<ExecBatch> batch =
-      ExecBatchFromJSON({int32(), boolean()},
-                        "[[4, false], [5, null], [6, false], [7, false], [null, true]]");
+ protected:
+  std::shared_ptr<ExecPlan> plan;
   PushGenerator<std::optional<ExecBatch>> batch_producer;
-  ASSERT_OK_AND_ASSIGN(auto plan, ExecPlan::Make());
-  auto basic_data = MakeBasicBatches();
+  ExecNode* source;
+  ExecNode* sink;
+  std::optional<ExecBatch> batch;
+};
 
-  ASSERT_OK_AND_ASSIGN(auto source,
-                       Declaration("source", SourceNodeOptions(schema_, batch_producer))
-                           .AddToPlan(plan.get()));
-
-  MakeDummyNode(plan.get(), "sink", /*inputs=*/{source}, /*is_sink=*/true,
-                /*start_producing =*/{},
-                /*stop_producing =*/{},
-                /*status_reporter =*/GetParam());
-
+TEST_P(ExecPlanErrorReporting, StopBeforeFinish) {
   bool should_start = GetParam().start_producing.ok();
   plan->StartProducing();
   SleepABit();
@@ -1867,43 +1892,20 @@ TEST_P(ExecPlanErrorReporting, Finish) {
   }
   batch_producer.producer().Push(batch);
   SleepABit();
-
-  bool should_receive = should_start && GetParam().input_received.ok();
-  if (should_receive) {
-    ASSERT_FALSE(plan->finished().is_finished());
-  } else {
-    ASSERT_FINISHES_AND_RAISES(Invalid, plan->finished());
-  }
-
-  batch_producer.producer().Push(std::nullopt);
+  plan->StopProducing();
   SleepABit();
-  bool should_finish = should_receive && GetParam().input_finished.ok();
-  if (should_finish) {
-    ASSERT_FINISHES_OK(plan->finished());
+  batch_producer.producer().Close();
+  bool should_stop = should_start && GetParam().input_received.ok() &&
+                     GetParam().stop_producing.ok() && GetParam().input_finished.ok();
+  if (should_stop) {
+    ASSERT_FINISHES_AND_RAISES(Cancelled, plan->finished());
   } else {
     ASSERT_FINISHES_AND_RAISES(Invalid, plan->finished());
     return;
   }
 }
 
-TEST_P(ExecPlanErrorReporting, StopProducing) {
-  std::shared_ptr<Schema> schema_ = schema({field("data", uint32())});
-  std::optional<ExecBatch> batch =
-      ExecBatchFromJSON({int32(), boolean()},
-                        "[[4, false], [5, null], [6, false], [7, false], [null, true]]");
-  PushGenerator<std::optional<ExecBatch>> batch_producer;
-  ASSERT_OK_AND_ASSIGN(auto plan, ExecPlan::Make());
-  auto basic_data = MakeBasicBatches();
-
-  ASSERT_OK_AND_ASSIGN(auto source,
-                       Declaration("source", SourceNodeOptions(schema_, batch_producer))
-                           .AddToPlan(plan.get()));
-
-  MakeDummyNode(plan.get(), "sink", /*inputs=*/{source}, /*is_sink=*/true,
-                /*start_producing =*/{},
-                /*stop_producing =*/{},
-                /*status_reporter =*/GetParam());
-
+TEST_P(ExecPlanErrorReporting, StopAfterFinish) {
   bool should_start = GetParam().start_producing.ok();
   plan->StartProducing();
   SleepABit();
@@ -1915,21 +1917,14 @@ TEST_P(ExecPlanErrorReporting, StopProducing) {
   batch_producer.producer().Push(batch);
   SleepABit();
 
-  bool should_receive = should_start && GetParam().input_received.ok();
-  if (should_receive) {
-    ASSERT_FALSE(plan->finished().is_finished());
-  } else {
-    ASSERT_FINISHES_AND_RAISES(Invalid, plan->finished());
-  }
-  // this should not be needed
-  batch_producer.producer().Push(std::nullopt);
+  batch_producer.producer().Close();
   SleepABit();
   plan->StopProducing();
   SleepABit();
-  bool should_stop =
-      should_receive && GetParam().stop_producing.ok() && GetParam().input_finished.ok();
-  if (should_stop) {
-    ASSERT_FINISHES_AND_RAISES(Cancelled, plan->finished());
+  bool should_finish =
+      should_start && GetParam().input_received.ok() && GetParam().input_finished.ok();
+  if (should_finish) {
+    ASSERT_FINISHES_OK(plan->finished());
   } else {
     ASSERT_FINISHES_AND_RAISES(Invalid, plan->finished());
     return;

@@ -58,6 +58,25 @@ GARROW_AVAILABLE_IN_20_0
 gint64
 garrow_array_statistics_get_null_count(GArrowArrayStatistics *statistics);
 
+GARROW_AVAILABLE_IN_21_0
+gboolean
+garrow_array_statistics_has_distinct_count(GArrowArrayStatistics *statistics);
+GARROW_AVAILABLE_IN_22_0
+gboolean
+garrow_array_statistics_is_distinct_count_exact(GArrowArrayStatistics *statistics);
+#ifndef GARROW_DISABLE_DEPRECATED
+GARROW_AVAILABLE_IN_21_0
+GARROW_DEPRECATED_IN_22_0_FOR(garrow_array_statistics_get_distinct_count_exact)
+gint64
+garrow_array_statistics_get_distinct_count(GArrowArrayStatistics *statistics);
+#endif
+GARROW_AVAILABLE_IN_22_0
+gint64
+garrow_array_statistics_get_distinct_count_exact(GArrowArrayStatistics *statistics);
+GARROW_AVAILABLE_IN_22_0
+gdouble
+garrow_array_statistics_get_distinct_count_approximate(GArrowArrayStatistics *statistics);
+
 GARROW_AVAILABLE_IN_6_0
 GArrowArray *
 garrow_array_import(gpointer c_abi_array, GArrowDataType *data_type, GError **error);
@@ -623,6 +642,31 @@ garrow_binary_view_array_new(gint64 length,
 GARROW_AVAILABLE_IN_20_0
 GBytes *
 garrow_binary_view_array_get_value(GArrowBinaryViewArray *array, gint64 i);
+
+#define GARROW_TYPE_STRING_VIEW_ARRAY (garrow_string_view_array_get_type())
+GARROW_AVAILABLE_IN_20_0
+G_DECLARE_DERIVABLE_TYPE(GArrowStringViewArray,
+                         garrow_string_view_array,
+                         GARROW,
+                         STRING_VIEW_ARRAY,
+                         GArrowBinaryViewArray)
+struct _GArrowStringViewArrayClass
+{
+  GArrowBinaryViewArrayClass parent_class;
+};
+
+GARROW_AVAILABLE_IN_20_0
+GArrowStringViewArray *
+garrow_string_view_array_new(gint64 length,
+                             GArrowBuffer *views,
+                             GList *data_buffers,
+                             GArrowBuffer *null_bitmap,
+                             gint64 n_nulls,
+                             gint64 offset);
+
+GARROW_AVAILABLE_IN_20_0
+GBytes *
+garrow_string_view_array_get_value(GArrowStringViewArray *array, gint64 i);
 
 #define GARROW_TYPE_DATE32_ARRAY (garrow_date32_array_get_type())
 GARROW_AVAILABLE_IN_ALL

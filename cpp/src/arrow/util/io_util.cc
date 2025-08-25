@@ -97,7 +97,7 @@
 #include "arrow/util/checked_cast.h"
 #include "arrow/util/config.h"
 #include "arrow/util/io_util.h"
-#include "arrow/util/logging.h"
+#include "arrow/util/logging_internal.h"
 #include "arrow/util/mutex.h"
 
 // For filename conversion
@@ -115,6 +115,7 @@
 #elif __linux__
 #  include <sys/sysinfo.h>
 #  include <fstream>
+#  include <limits>
 #endif
 
 #ifdef _WIN32
@@ -2141,11 +2142,6 @@ uint64_t GetThreadId() {
   return equiv;
 }
 
-uint64_t GetOptionalThreadId() {
-  auto tid = GetThreadId();
-  return (tid == 0) ? tid - 1 : tid;
-}
-
 // Returns the current resident set size (physical memory use) measured
 // in bytes, or zero if the value cannot be determined on this OS.
 int64_t GetCurrentRSS() {
@@ -2224,6 +2220,22 @@ int64_t GetTotalMemoryBytes() {
 #endif
 }
 
+Result<int32_t> GetNumAffinityCores() {
+#if defined(__linux__)
+  cpu_set_t mask;
+  if (sched_getaffinity(0, sizeof(mask), &mask) == 0) {
+    auto count = CPU_COUNT(&mask);
+    if (count > 0 &&
+        static_cast<uint64_t>(count) < std::numeric_limits<uint32_t>::max()) {
+      return static_cast<uint32_t>(count);
+    }
+  }
+  return IOErrorFromErrno(errno, "Could not read the CPU affinity.");
+#else
+  return Status::NotImplemented("Only implemented for Linux");
+#endif
+}
+
 Result<void*> LoadDynamicLibrary(const char* path) {
 #ifdef _WIN32
   ARROW_ASSIGN_OR_RAISE(auto platform_path, PlatformFilename::FromString(path));
@@ -2232,7 +2244,7 @@ Result<void*> LoadDynamicLibrary(const char* path) {
   constexpr int kFlags =
       // All undefined symbols in the shared object are resolved before dlopen() returns.
       RTLD_NOW
-      // Symbols defined in  this  shared  object are not made available to
+      // Symbols defined in this shared object are not made available to
       // resolve references in subsequently loaded shared objects.
       | RTLD_LOCAL;
   if (void* handle = dlopen(path, kFlags)) return handle;
